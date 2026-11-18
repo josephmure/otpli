@@ -1,0 +1,19 @@
+[workspace]
+name = "otpli"
+description = "Minimal environment to run examples/plot_pli_quantile.py (otpli, OpenTURNS)"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.13.*"
+openturns = "*"
+numpy = "*"
+ipykernel = "*"
+pip = "*"
+
+[pypi-dependencies]
+otpli = { path = ".", editable = true }
+
+[tasks]
+plot = "python examples/plot_pli_quantile.py"
+test = { cmd = "python -c \"import test_mean_var as a, test_bootstrap_guards as b; a.test_mean_quantile_analytic(); a.test_var_ratio_nominal(); b.test_bootstrap_disabled(); b.test_bootstrap_ratio_shape(); b.test_guards(); b.test_docstring(); print('OK')\"", cwd = "test" }
