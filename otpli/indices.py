@@ -9,14 +9,20 @@ otpli.indices: Gaussian PLI engine (Q1-Q7).
 - `compute_var(X, Y, ratios)`: scale tilt, `r > 0` parameter.
 - Joint `(U, Y)` bootstrap by per-replicate ratio (Q6-A),
   `n_bootstrap=1000` by default, `0` = disabled (Q7-B).
-- `variation="relative"` (`Qd/Q0 - 1`, default) or `"absolute"` (`Qd - Q0`, Q4-B).
+- `absolute_variation=False` by default: dimensionless relative
+  variation (`Qd/Q0 - 1`, the norm, comparable across quantities);
+  `True` selects the absolute fallback (`Qd - Q0`) for null references
+  (Q4-B).
 - Single stepwise quantile for nominal and perturbed (Q5-A): `PLI = 0`
   exact at the nominal point by construction.
 """
+
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
 import openturns as ot
+from numpy.typing import ArrayLike
 
 from .perturbation import (
     ess_ratio,
@@ -26,7 +32,8 @@ from .perturbation import (
     logweights_var,
     normalized_weights,
 )
-from .utils import physical_to_standard, to_numpy, warn_if_low_ess
+from .quantity import QuantityOfInterest
+from .utils import physical_to_standard, warn_if_low_ess
 
 
 @dataclass
@@ -57,11 +64,13 @@ class PerturbedLawIndices:
     quantity : callable
         Quantity `Q(y, w)` of the weighted contract (Q3-A).
     n_bootstrap : int
-        Number of replicates (Q7-B: default 1000, 0 = no CI).
+        Number of replicates (Q7-B: default 1000, 0 = no confidence interval).
     confidence : float
         Confidence level in `(0, 1)` (default 0.95).
-    variation : str
-        `"relative"` (`Qd/Q0 - 1`, default) or `"absolute"` (`Qd - Q0`, Q4-B).
+    absolute_variation : bool
+        `False` (default): relative variation `Qd/Q0 - 1`, dimensionless
+        and comparable across quantities of different natures (the norm).
+        `True`: absolute fallback `Qd - Q0`, for null references (Q4-B).
     ess_threshold : float
         Indicative `ESS/N` warning threshold (default 0.01, §5.5).
     seed : int or None
@@ -70,55 +79,66 @@ class PerturbedLawIndices:
 
     def __init__(
         self,
-        distribution,
-        quantity,
-        n_bootstrap=1000,
-        confidence=0.95,
-        variation="relative",
-        ess_threshold=0.01,
-        seed=0,
-    ):
-        if variation not in ("relative", "absolute"):
-            raise ValueError("variation must be 'relative' or 'absolute'.")
+        distribution: ot.Distribution,
+        quantity: QuantityOfInterest,
+        n_bootstrap: int = 1000,
+        confidence: float = 0.95,
+        absolute_variation: bool = False,
+        ess_threshold: float = 0.01,
+        seed: int | None = 0,
+    ) -> None:
         if not 0.0 < float(confidence) < 1.0:
-            raise ValueError("confidence must be in (0, 1).")
+            raise ValueError(f"confidence must be in (0, 1): got {confidence!r}.")
         if int(n_bootstrap) < 0:
-            raise ValueError("n_bootstrap must be >= 0.")
+            raise ValueError(f"n_bootstrap must be >= 0: got {n_bootstrap!r}.")
         self.distribution = distribution
         self.quantity = quantity
         self.n_bootstrap = int(n_bootstrap)
         self.confidence = float(confidence)
-        self.variation = variation
+        self.absolute_variation = bool(absolute_variation)
         self.ess_threshold = float(ess_threshold)
         self.seed = seed
 
     # -- internals ----------------------------------------------------
-    def _prepare(self, X, Y):
-        Xn = to_numpy(X)
-        Yn = to_numpy(Y)
+    def _prepare(self, X: ot.Sample, Y: ot.Sample) -> tuple[np.ndarray, np.ndarray]:
+        Xn = np.asarray(X)
+        Yn = np.asarray(Y)
         if Xn.shape[0] != Yn.shape[0]:
-            raise ValueError("X and Y must share the same N.")
+            raise ValueError(
+                "X and Y must have the same size: "
+                f"got size(X)={Xn.shape[0]}, size(Y)={Yn.shape[0]}."
+            )
         if Yn.shape[1] != 1:
-            raise ValueError("1D Y only in this sketch.")
+            raise ValueError(
+                f"Y must have dimension 1: got dim={Yn.shape[1]} "
+                f"(shape={Yn.shape})."
+            )
         U = physical_to_standard(self.distribution, ot.Sample(Xn.tolist()))
         y = Yn[:, 0]
         return U, y
 
-    def _pli_from_quantities(self, qd, q0):
-        if self.variation == "relative":
+    def _pli_from_quantities(self, qd: float, q0: float) -> float:
+        if not self.absolute_variation:
             if abs(float(q0)) == 0.0:
                 return float("nan")
             return float(qd) / float(q0) - 1.0
         return float(qd) - float(q0)
 
-    def _run_grid(self, U, y, grid, logw_fn, kl_fn, mode):
+    def _run_grid(
+        self,
+        U: np.ndarray,
+        y: np.ndarray,
+        grid: np.ndarray,
+        logw_fn: Callable[[np.ndarray, float], np.ndarray],
+        kl_fn: Callable[[float], float],
+        mode: str,
+    ) -> PerturbedLawIndicesResult:
         d = U.shape[1]
         K = len(grid)
         N = len(y)
         w0 = normalized_weights(np.zeros(N))
-        q0 = np.array([self.quantity(y, w0) for _ in range(d)])
-        # 1D QoI: same nominal for each input before perturbation
-        q0 = np.repeat(q0[:1], d)
+        # 1D QoI: single nominal call, repeated for each input (shape (d,))
+        q0 = np.full(d, self.quantity(y, w0))
         pli = np.zeros((K, d))
         quant = np.zeros((K, d))
         ess = np.zeros((K, d))
@@ -172,7 +192,9 @@ class PerturbedLawIndices:
         )
 
     # -- API ----------------------------------------------------------
-    def compute_mean(self, X, Y, shifts):
+    def compute_mean(
+        self, X: ot.Sample, Y: ot.Sample, shifts: ArrayLike
+    ) -> PerturbedLawIndicesResult:
         """
         PLI under mean tilt: signed `delta` in standard space (Q1-A).
 
@@ -188,10 +210,13 @@ class PerturbedLawIndices:
         PerturbedLawIndicesResult
         """
         U, y = self._prepare(X, Y)
-        return self._run_grid(U, y, np.asarray(shifts, dtype=float),
-                             logweights_mean, kl_mean, "mean")
+        return self._run_grid(
+            U, y, np.asarray(shifts, dtype=float), logweights_mean, kl_mean, "mean"
+        )
 
-    def compute_var(self, X, Y, ratios):
+    def compute_var(
+        self, X: ot.Sample, Y: ot.Sample, ratios: ArrayLike
+    ) -> PerturbedLawIndicesResult:
         """
         PLI under Gaussian scale tilt: `r = V / sigma0**2` (Q1-A1).
 
@@ -208,6 +233,9 @@ class PerturbedLawIndices:
         """
         ratios = np.asarray(ratios, dtype=float)
         if np.any(ratios <= 0.0):
-            raise ValueError("Ratios r must be > 0 strict.")
+            raise ValueError(
+                "Ratios r must be > 0 strict: "
+                f"got min={float(np.min(ratios))!r} in {np.asarray(ratios).ravel()[:8]}."
+            )
         U, y = self._prepare(X, Y)
         return self._run_grid(U, y, ratios, logweights_var, kl_var, "var")

@@ -9,6 +9,7 @@ The nominal value is computed by `Q(y, 1)`: `PLI(0) = 0` by construction,
 continuous curve, single estimator (report rules D1/D2).
 """
 import numpy as np
+from numpy.typing import ArrayLike
 
 
 class QuantityOfInterest:
@@ -28,20 +29,27 @@ class QuantityOfInterest:
         Estimated quantity.
     """
 
-    def __call__(self, y, w):
+    def __call__(self, y: np.ndarray, w: np.ndarray) -> float:
         raise NotImplementedError
 
 
-def _as_1d(y, w):
+def _as_1d(y: ArrayLike, w: ArrayLike) -> tuple[np.ndarray, np.ndarray]:
     y = np.ravel(np.asarray(y, dtype=float))
     w = np.ravel(np.asarray(w, dtype=float))
     if y.shape != w.shape:
-        raise ValueError("y and w must have the same size.")
+        raise ValueError(
+            f"y and w must have the same size: got {y.shape} and {w.shape}."
+        )
     if np.any(w < 0.0) or not np.all(np.isfinite(w)):
-        raise ValueError("Negative or non-finite weights.")
+        n_neg = int(np.sum(w < 0.0))
+        n_bad = int(np.sum(~np.isfinite(w)))
+        raise ValueError(
+            "Negative or non-finite weights: "
+            f"n_negative={n_neg}, n_nonfinite={n_bad}, min={float(np.min(w))!r}."
+        )
     s = np.sum(w)
     if s <= 0.0 or not np.isfinite(s):
-        raise ValueError("Null or non-finite weight sum.")
+        raise ValueError(f"Null or non-finite weight sum: got sum={float(s)!r}.")
     return y, w
 
 
@@ -58,12 +66,16 @@ class Quantile(QuantityOfInterest):
         Order in `(0, 1)`.
     """
 
-    def __init__(self, alpha):
-        if not 0.0 < float(alpha) < 1.0:
-            raise ValueError("alpha must be in (0, 1).")
-        self.alpha = float(alpha)
+    def __init__(self, alpha: float) -> None:
+        try:
+            a = float(alpha)
+        except (TypeError, ValueError):
+            raise ValueError(f"alpha must be in (0, 1): got {alpha!r}.") from None
+        if not 0.0 < a < 1.0:
+            raise ValueError(f"alpha must be in (0, 1): got {alpha!r}.")
+        self.alpha = a
 
-    def __call__(self, y, w):
+    def __call__(self, y: np.ndarray, w: np.ndarray) -> float:
         y, w = _as_1d(y, w)
         order = np.argsort(y, kind="mergesort")
         ys, ws = y[order], w[order]
@@ -85,11 +97,11 @@ class SuperQuantile(QuantityOfInterest):
         Order in `(0, 1)`.
     """
 
-    def __init__(self, alpha):
+    def __init__(self, alpha: float) -> None:
         self._q = Quantile(alpha)
         self.alpha = self._q.alpha
 
-    def __call__(self, y, w):
+    def __call__(self, y: np.ndarray, w: np.ndarray) -> float:
         y, w = _as_1d(y, w)
         q = self._q(y, w)
         mask = y >= q
@@ -101,7 +113,7 @@ class SuperQuantile(QuantityOfInterest):
 class Mean(QuantityOfInterest):
     """Weighted mean (generic-QoI example, meeting notes)."""
 
-    def __call__(self, y, w):
+    def __call__(self, y: np.ndarray, w: np.ndarray) -> float:
         y, w = _as_1d(y, w)
         return float(np.sum(y * w) / np.sum(w))
 
@@ -109,7 +121,7 @@ class Mean(QuantityOfInterest):
 class Variance(QuantityOfInterest):
     """Weighted variance (generic-QoI example, meeting notes)."""
 
-    def __call__(self, y, w):
+    def __call__(self, y: np.ndarray, w: np.ndarray) -> float:
         y, w = _as_1d(y, w)
         m = np.sum(y * w) / np.sum(w)
         return float(np.sum(w * (y - m) ** 2) / np.sum(w))

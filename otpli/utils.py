@@ -11,9 +11,10 @@ import warnings
 
 import numpy as np
 import openturns as ot
+from numpy.typing import ArrayLike
 
 
-def check_independent(distribution):
+def check_independent(distribution: ot.Distribution) -> None:
     """
     Require independent inputs (Q2-A).
 
@@ -28,13 +29,19 @@ def check_independent(distribution):
         If the copula is not independent.
     """
     if not distribution.hasIndependentCopula():
+        try:
+            copula_name = (
+                distribution.getCopula().getImplementation().getClassName()
+            )
+        except Exception:
+            copula_name = "unknown"
         raise ValueError(
             "otpli v1 is restricted to independent inputs "
-            "(Q2-A): non-independent copula rejected."
+            f"(Q2-A): non-independent copula rejected (copula={copula_name!r})."
         )
 
 
-def check_standard_normal(distribution):
+def check_standard_normal(distribution: ot.Distribution) -> None:
     """
     Check that the standard distribution is standardized Gaussian.
 
@@ -61,26 +68,16 @@ def check_standard_normal(distribution):
             f"(Q1, Gaussian KL frame): standard={classname!r} rejected."
         )
     if std.getDimension() != distribution.getDimension():
-        raise ValueError("Inconsistent standard distribution dimension.")
+        raise ValueError(
+            "Inconsistent standard distribution dimension: "
+            f"standard dim={std.getDimension()}, "
+            f"distribution dim={distribution.getDimension()}."
+        )
 
 
-def to_numpy(sample):
-    """
-    Convert an `ot.Sample` to a 2D `numpy.ndarray`.
-
-    Parameters
-    ----------
-    sample : :py:class:`openturns.Sample`
-
-    Returns
-    -------
-    numpy.ndarray
-        Array of size `(n, d)`.
-    """
-    return np.asarray(sample)
-
-
-def to_sample(array, descriptions=None):
+def to_sample(
+    array: ArrayLike, descriptions: list[str] | None = None
+) -> ot.Sample:
     """
     Convert a 2D numpy array to an `ot.Sample`.
 
@@ -99,7 +96,9 @@ def to_sample(array, descriptions=None):
     return sample
 
 
-def physical_to_standard(distribution, X):
+def physical_to_standard(
+    distribution: ot.Distribution, X: ot.Sample
+) -> np.ndarray:
     """
     Apply the isoprobabilistic transformation `U = T(X)`.
 
@@ -116,10 +115,10 @@ def physical_to_standard(distribution, X):
     check_independent(distribution)
     check_standard_normal(distribution)
     T = distribution.getIsoProbabilisticTransformation()
-    return to_numpy(T(X))
+    return np.asarray(T(X))
 
 
-def ess_ratio_from_logweights(logw):
+def ess_ratio_from_logweights(logw: ArrayLike) -> float:
     """
     Normalized effective sample size.
 
@@ -133,6 +132,7 @@ def ess_ratio_from_logweights(logw):
     float
         `ESS / N` in `(0, 1]`.
     """
+    logw = np.asarray(logw, dtype=float)
     m = np.max(logw)
     w = np.exp(logw - m)
     s1 = np.sum(w)
@@ -142,7 +142,9 @@ def ess_ratio_from_logweights(logw):
     return float(s1 * s1 / (len(w) * s2))
 
 
-def warn_if_low_ess(grid, ess_ratio, threshold=0.01):
+def warn_if_low_ess(
+    grid: ArrayLike, ess_ratio: ArrayLike, threshold: float = 0.01
+) -> None:
     """
     Warn when `ESS / N` falls below the threshold (Q1, §5.5).
 

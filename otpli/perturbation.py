@@ -9,11 +9,12 @@ MEAN mode: `U_i -> N(delta, 1)`, `w = exp(delta * u)`, `KL = delta**2 / 2`.
 VAR mode: `U_i -> N(0, tau**2)` with `tau**2 = r`, `KL = log(tau) + 1/(2 tau**2) - 1/2`.
 """
 import numpy as np
+from numpy.typing import ArrayLike
 
 from .utils import ess_ratio_from_logweights
 
 
-def logweights_mean(u_col, delta):
+def logweights_mean(u_col: ArrayLike, delta: float) -> np.ndarray:
     """
     Log-weights of the mean tilt.
 
@@ -33,7 +34,7 @@ def logweights_mean(u_col, delta):
     return np.asarray(u_col, dtype=float) * float(delta)
 
 
-def logweights_var(u_col, ratio):
+def logweights_var(u_col: ArrayLike, ratio: float) -> np.ndarray:
     """
     Log-weights of the Gaussian scale tilt (VAR mode reinstated on 11/16).
 
@@ -52,14 +53,14 @@ def logweights_var(u_col, ratio):
     """
     r = float(ratio)
     if not np.isfinite(r) or r <= 0.0:
-        raise ValueError("Variance ratio r must be > 0 strict.")
+        raise ValueError(f"Variance ratio r must be > 0 strict: got {ratio!r}.")
     tau2 = r
     a = 0.5 * (1.0 - 1.0 / tau2)
     u = np.asarray(u_col, dtype=float)
     return a * u * u - 0.5 * np.log(tau2)
 
 
-def kl_mean(delta):
+def kl_mean(delta: float) -> float:
     """
     `KL(nominal || perturbed)` divergence of the mean tilt.
 
@@ -75,7 +76,7 @@ def kl_mean(delta):
     return 0.5 * float(delta) ** 2
 
 
-def kl_var(ratio):
+def kl_var(ratio: float) -> float:
     """
     `KL(nominal || perturbed)` divergence of the scale tilt.
 
@@ -92,14 +93,17 @@ def kl_var(ratio):
     """
     r = float(ratio)
     if not np.isfinite(r) or r <= 0.0:
-        raise ValueError("Variance ratio r must be > 0 strict.")
+        raise ValueError(f"Variance ratio r must be > 0 strict: got {ratio!r}.")
     tau = float(np.sqrt(r))
     return float(np.log(tau) + 1.0 / (2.0 * r) - 0.5)
 
 
-def normalized_weights(logw):
+def normalized_weights(logw: ArrayLike) -> np.ndarray:
     """
-    Normalize log-weights via `logsumexp` (stable, vectorizable).
+    Normalize log-weights with the log-sum-exp trick (stable, vectorizable).
+
+    The maximum is subtracted before exponentiation, which is the
+    log-sum-exp stabilization done by hand (no `scipy` call).
 
     Parameters
     ----------
@@ -115,11 +119,11 @@ def normalized_weights(logw):
     w = np.exp(logw - m)
     s = np.sum(w)
     if s <= 0.0 or not np.isfinite(s):
-        raise ValueError("Weight normalization failed.")
+        raise ValueError(f"Weight normalization failed: sum={float(s)!r}.")
     return w / s
 
 
-def ess_ratio(logw):
+def ess_ratio(logw: ArrayLike) -> float:
     """
     `ESS / N` from log-weights (§5.5 diagnostic).
 
