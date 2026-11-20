@@ -1,11 +1,7 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Copyright (C) EDF 2026
 
 otpli.utils: guards and conversions.
-
-Covered decisions: Q2 (independence), Q1 (KL/ESS), Q6 (joint bootstrap).
 """
 import warnings
 
@@ -33,11 +29,11 @@ def check_independent(distribution: ot.Distribution) -> None:
             copula_name = (
                 distribution.getCopula().getImplementation().getClassName()
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - diagnostic name only, never masks logic
             copula_name = "unknown"
         raise ValueError(
-            "otpli v1 is restricted to independent inputs "
-            f"(Q2-A): non-independent copula rejected (copula={copula_name!r})."
+            "otpli v1 is restricted to independent inputs: "
+            f"non-independent copula rejected (copula={copula_name!r})."
         )
 
 
@@ -46,7 +42,7 @@ def check_standard_normal(distribution: ot.Distribution) -> None:
     Check that the standard distribution is standardized Gaussian.
 
     The proxy returned by `getStandardDistribution` is not reliable alone:
-    the actual implementation class name is checked (see report §5.1).
+    the actual implementation class name is checked.
 
     Parameters
     ----------
@@ -60,12 +56,12 @@ def check_standard_normal(distribution: ot.Distribution) -> None:
     std = distribution.getStandardDistribution()
     try:
         classname = std.getImplementation().getClassName()
-    except Exception:
+    except Exception:  # noqa: BLE001 - fallback introspection only
         classname = std.getClassName() if hasattr(std, "getClassName") else ""
     if classname != "Normal":
         raise ValueError(
             "otpli requires a Gaussian standard distribution "
-            f"(Q1, Gaussian KL frame): standard={classname!r} rejected."
+            f"(Gaussian KL frame): standard={classname!r} rejected."
         )
     if std.getDimension() != distribution.getDimension():
         raise ValueError(
@@ -97,15 +93,18 @@ def to_sample(
 
 
 def physical_to_standard(
-    distribution: ot.Distribution, X: ot.Sample
+    distribution: ot.Distribution, X: ArrayLike
 ) -> np.ndarray:
     """
-    Apply the isoprobabilistic transformation `U = T(X)`.
+    Apply the isoprobabilistic transformation :math:`U = T(X)`.
+
+    `T` accepts `Sample`, `ndarray` or nested lists, so no
+    `Sample` conversion is needed beforehand.
 
     Parameters
     ----------
     distribution : :py:class:`openturns.Distribution`
-    X : :py:class:`openturns.Sample`
+    X : array-like, size `(n, d)`
 
     Returns
     -------
@@ -115,11 +114,11 @@ def physical_to_standard(
     check_independent(distribution)
     check_standard_normal(distribution)
     T = distribution.getIsoProbabilisticTransformation()
-    return np.asarray(T(X))
+    return np.asarray(T(np.ascontiguousarray(np.asarray(X, dtype=float))))
 
 
 def ess_ratio_from_logweights(logw: ArrayLike) -> float:
-    """
+    r"""
     Normalized effective sample size.
 
     Parameters
@@ -130,7 +129,7 @@ def ess_ratio_from_logweights(logw: ArrayLike) -> float:
     Returns
     -------
     float
-        `ESS / N` in `(0, 1]`.
+        :math:`\mathrm{ESS}/N \in (0, 1]`.
     """
     logw = np.asarray(logw, dtype=float)
     m = np.max(logw)
@@ -145,21 +144,44 @@ def ess_ratio_from_logweights(logw: ArrayLike) -> float:
 def warn_if_low_ess(
     grid: ArrayLike, ess_ratio: ArrayLike, threshold: float = 0.01
 ) -> None:
-    """
-    Warn when `ESS / N` falls below the threshold (Q1, §5.5).
+    r"""
+    Warn when :math:`\mathrm{ESS}/N` falls below the threshold.
 
     No hard thresholding on the grid: only validity is flagged.
+    The check uses the minimum across input dimensions: if any
+    dimension is degenerate at a grid point, the point is flagged.
 
     Parameters
     ----------
     grid : numpy.ndarray
-        Grid (`delta` or `r`).
+        Grid (:math:`\delta` or :math:`r`), size `(K,)`.
     ess_ratio : numpy.ndarray
-        `ESS / N` of the same size.
+        :math:`\mathrm{ESS}/N`, size `(K,)` or `(K, d)` per (grid, dim).
     threshold : float
-        Indicative threshold (default `0.01`, see report §5.5).
+        Indicative threshold (default `0.01`).
     """
-    bad = np.asarray(ess_ratio) < threshold
+    ess = np.asarray(ess_ratio, dtype=float)
+    g = np.asarray(grid)
+    if ess.ndim == 2:
+        # (K, d): flag grid points where min_d ESS/N < threshold.
+        bad = np.min(ess, axis=1) < threshold
+        if np.any(bad):
+            vals = g[np.atleast_1d(bad)]
+            # Worst (grid, dim) for the message.
+            j_bad, i_bad = np.unravel_index(
+                int(np.argmin(ess)), ess.shape
+            )
+            warnings.warn(
+                f"ESS/N < {threshold} for {int(np.sum(bad))} grid point(s) "
+                f"(e.g. grid={np.asarray(vals).ravel()[:4]}, "
+                f"worst at grid={g[j_bad]!r} dim={i_bad} "
+                f"ESS/N={ess[j_bad, i_bad]:.4g}): "
+                "PLI curve potentially noisy.",
+                UserWarning,
+                stacklevel=3,
+            )
+        return
+    bad = ess < threshold
     if np.any(bad):
         vals = np.asarray(grid)[np.atleast_1d(bad)]
         warnings.warn(

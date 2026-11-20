@@ -6,7 +6,8 @@ name = "otpli"
 version = "0.1"
 description = "Perturbed-Law based Indices in the Gaussian Kullback-Leibler frame on OpenTURNS objects"
 readme = "README.md"
-dependencies = ["openturns", "numpy"]
+requires-python = ">=3.10"
+dependencies = ["openturns>=1.25", "numpy>=1.26"]
 authors = [
   {name = "OpenTURNS PLI working group"},
 ]

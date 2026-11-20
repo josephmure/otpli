@@ -10,8 +10,14 @@ Perturbations of the mean or the variance are then applied to this normal distri
 ## Installation
 
 ```bash
-pip install -e .
+pixi install
+pixi run test
+pixi run plot
+# or dedicated shell :
+pixi shell
 ```
+
+`pip install -e .` remains possible (outside pixi).
 
 ## Minimal example
 

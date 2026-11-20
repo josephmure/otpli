@@ -1,21 +1,21 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
+r"""
 Copyright (C) EDF 2026
 
-otpli.perturbation: weights, KL and ESS of Gaussian tilts (Q1).
+otpli.perturbation: weights, KL and ESS of Gaussian tilts.
 
-MEAN mode: `U_i -> N(delta, 1)`, `w = exp(delta * u)`, `KL = delta**2 / 2`.
-VAR mode: `U_i -> N(0, tau**2)` with `tau**2 = r`, `KL = log(tau) + 1/(2 tau**2) - 1/2`.
+MEAN mode: :math:`U_i \to \mathcal{N}(\delta, 1)`,
+:math:`w = \exp(\delta u)`,
+:math:`\mathrm{KL} = \delta^2/2`.
+VAR mode: :math:`U_i \to \mathcal{N}(0, \tau^2)` with
+:math:`\tau^2 = r`,
+:math:`\mathrm{KL} = \log(\tau) + 1/(2\tau^2) - 1/2`.
 """
 import numpy as np
 from numpy.typing import ArrayLike
 
-from .utils import ess_ratio_from_logweights
-
 
 def logweights_mean(u_col: ArrayLike, delta: float) -> np.ndarray:
-    """
+    r"""
     Log-weights of the mean tilt.
 
     Parameters
@@ -28,23 +28,26 @@ def logweights_mean(u_col: ArrayLike, delta: float) -> np.ndarray:
     Returns
     -------
     numpy.ndarray
-        `log w = delta * u` (constant `-delta**2/2` omitted: normalized
-        in the estimator, see report §5.5).
+        :math:`\log w = \delta u` (constant :math:`-\delta^2/2` omitted:
+        normalized in the estimator).
     """
     return np.asarray(u_col, dtype=float) * float(delta)
 
 
 def logweights_var(u_col: ArrayLike, ratio: float) -> np.ndarray:
-    """
-    Log-weights of the Gaussian scale tilt (VAR mode reinstated on 11/16).
+    r"""
+    Log-weights of the Gaussian scale tilt.
 
-    `w ~ (1/tau) * exp(a * u**2)` with `a = (1 - 1/tau**2)/2`, `tau = sqrt(r)`.
+    :math:`w \sim \exp(a u^2)` with :math:`a = (1 - 1/\tau^2)/2`,
+    :math:`\tau = \sqrt{r}`.
+    The multiplicative constant is omitted (as in mean mode):
+    only differences matter after `log-sum-exp` normalization.
 
     Parameters
     ----------
     u_col : numpy.ndarray, size `(n,)`
     ratio : float
-        `r = V / sigma0**2 > 0` strict, `r = 1` is nominal.
+        :math:`r = V/\sigma_0^2 > 0` strict, :math:`r = 1` is nominal.
 
     Returns
     -------
@@ -57,12 +60,16 @@ def logweights_var(u_col: ArrayLike, ratio: float) -> np.ndarray:
     tau2 = r
     a = 0.5 * (1.0 - 1.0 / tau2)
     u = np.asarray(u_col, dtype=float)
-    return a * u * u - 0.5 * np.log(tau2)
+    return a * u * u
 
 
 def kl_mean(delta: float) -> float:
-    """
-    `KL(nominal || perturbed)` divergence of the mean tilt.
+    r"""
+    :math:`\mathrm{KL}(P_0 \parallel P_\delta)` divergence of the mean tilt.
+
+    :math:`P_0 = \mathcal{N}(0, 1)`,
+    :math:`P_\delta = \mathcal{N}(\delta, 1)`: symmetric,
+    :math:`\delta^2/2` in both directions.
 
     Parameters
     ----------
@@ -71,21 +78,25 @@ def kl_mean(delta: float) -> float:
     Returns
     -------
     float
-        `delta**2 / 2`.
+        :math:`\delta^2/2`.
     """
     return 0.5 * float(delta) ** 2
 
 
 def kl_var(ratio: float) -> float:
-    """
-    `KL(nominal || perturbed)` divergence of the scale tilt.
+    r"""
+    :math:`\mathrm{KL}(P_0 \parallel P_\delta)` divergence of the scale tilt.
 
-    `N(0,1) -> N(0, tau**2)`: `log(tau) + 1/(2 tau**2) - 1/2`.
+    :math:`P_0 = \mathcal{N}(0, 1)`, :math:`P_\delta = \mathcal{N}(0, r)`:
+    :math:`\log(\sqrt{r}) + 1/(2r) - 1/2`.
+    Asymmetric: the reverse :math:`\mathrm{KL}(P_\delta \parallel P_0)` is
+    :math:`-\log(\sqrt{r}) + r/2 - 1/2`. The reported diagnostic keeps the
+    reference-first convention :math:`\mathrm{KL}(P_0 \parallel P_\delta)`.
 
     Parameters
     ----------
     ratio : float
-        `r = tau**2 > 0`.
+        :math:`r = \tau^2 > 0`.
 
     Returns
     -------
@@ -104,6 +115,9 @@ def normalized_weights(logw: ArrayLike) -> np.ndarray:
 
     The maximum is subtracted before exponentiation, which is the
     log-sum-exp stabilization done by hand (no `scipy` call).
+    Raises when no mathematically valid normalized distribution exists
+    (all weights zero / non-finite); use `ess_ratio_from_logweights` for a soft
+    degeneracy diagnostic (returns `0.0` instead of raising).
 
     Parameters
     ----------
@@ -115,24 +129,14 @@ def normalized_weights(logw: ArrayLike) -> np.ndarray:
         Weights summing to 1.
     """
     logw = np.asarray(logw, dtype=float)
+    if logw.size == 0:
+        raise ValueError("Weight normalization failed: empty log-weights.")
     m = np.max(logw)
     w = np.exp(logw - m)
     s = np.sum(w)
     if s <= 0.0 or not np.isfinite(s):
-        raise ValueError(f"Weight normalization failed: sum={float(s)!r}.")
+        raise ValueError(
+            "Weight normalization failed: degenerate weights "
+            f"(size={logw.size}, max_logw={float(m)!r}, sum={float(s)!r})."
+        )
     return w / s
-
-
-def ess_ratio(logw: ArrayLike) -> float:
-    """
-    `ESS / N` from log-weights (§5.5 diagnostic).
-
-    Parameters
-    ----------
-    logw : numpy.ndarray
-
-    Returns
-    -------
-    float
-    """
-    return ess_ratio_from_logweights(np.asarray(logw, dtype=float))

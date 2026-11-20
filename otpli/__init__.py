@@ -1,22 +1,21 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""otpli module (conventions othpc : exports explicites + version)."""
+"""otpli module: explicit exports + version."""
 from .indices import PerturbedLawIndices, PerturbedLawIndicesResult
-from .perturbation import ess_ratio, kl_mean, kl_var, logweights_mean, logweights_var
-from .quantity import Mean, QuantityOfInterest, Quantile, SuperQuantile, Variance
+from .perturbation import kl_mean, kl_var, logweights_mean, logweights_var
+from .quantity import Mean, Quantile, QuantityOfInterest, SuperQuantile, Variance
+from .utils import ess_ratio_from_logweights
 
 __all__ = [
+    "Mean",
     "PerturbedLawIndices",
     "PerturbedLawIndicesResult",
-    "QuantityOfInterest",
     "Quantile",
+    "QuantityOfInterest",
     "SuperQuantile",
-    "Mean",
     "Variance",
-    "logweights_mean",
-    "logweights_var",
+    "ess_ratio_from_logweights",
     "kl_mean",
     "kl_var",
-    "ess_ratio",
+    "logweights_mean",
+    "logweights_var",
 ]
 __version__ = "0.1"

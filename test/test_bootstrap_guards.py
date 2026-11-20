@@ -37,22 +37,18 @@ def _assert_raises(fn):
 
 def test_guards():
     ot.RandomGenerator.SetSeed(0)
-    # Q2-A: non-independent copula rejected
+    # Q2-A: non-independent copula rejected (fail-fast at construction)
     R = ot.CorrelationMatrix(2)
     R[0, 1] = 0.8
     dep = ot.JointDistribution([ot.Normal()] * 2, ot.NormalCopula(R))
     X = dep.getSample(100)
-    Y = ot.Sample(np.asarray(X)[:, [0]].tolist())
-    pli = otpli.PerturbedLawIndices(dep, otpli.Mean(), n_bootstrap=0)
-    _assert_raises(lambda: pli.compute_mean(X, Y, shifts=np.array([0.0, 1.0])))
+    ot.Sample(np.asarray(X)[:, [0]].tolist())
+    _assert_raises(lambda: otpli.PerturbedLawIndices(dep, otpli.Mean(), n_bootstrap=0))
     # Non-Gaussian standard law (1D Student) rejected (§5.1):
     # the standalone marginal has a Student standard (std ~ 1.29),
     # the MGF diverges, the tilt is not definable.
     stu = ot.Student(5.0, 0.0, 1.0)
-    Xs = stu.getSample(100)
-    Ys = ot.Sample([[float(v[0])] for v in Xs])
-    plis = otpli.PerturbedLawIndices(stu, otpli.Mean(), n_bootstrap=0)
-    _assert_raises(lambda: plis.compute_mean(Xs, Ys, shifts=np.array([0.5])))
+    _assert_raises(lambda: otpli.PerturbedLawIndices(stu, otpli.Mean(), n_bootstrap=0))
     # r <= 0 rejected (Q1)
     ind = ot.JointDistribution([ot.Normal()] * 1)
     Xi = ind.getSample(100)
@@ -63,6 +59,7 @@ def test_guards():
 
 def test_docstring():
     import doctest
+
     import otpli.indices
     import otpli.perturbation
     import otpli.quantity
