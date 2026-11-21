@@ -1,10 +1,18 @@
 """otpli module: explicit exports + version."""
 from .indices import PerturbedLawIndices, PerturbedLawIndicesResult
 from .perturbation import kl_mean, kl_var, logweights_mean, logweights_var
-from .quantity import Mean, Quantile, QuantityOfInterest, SuperQuantile, Variance
+from .quantity import (
+    DomainProbability,
+    Mean,
+    Quantile,
+    QuantityOfInterest,
+    SuperQuantile,
+    Variance,
+)
 from .utils import ess_ratio_from_logweights
 
 __all__ = [
+    "DomainProbability",
     "Mean",
     "PerturbedLawIndices",
     "PerturbedLawIndicesResult",

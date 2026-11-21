@@ -10,6 +10,7 @@ continuous curve, single estimator.
 import warnings
 
 import numpy as np
+import openturns as ot
 from numpy.typing import ArrayLike
 
 
@@ -162,6 +163,70 @@ class Mean(QuantityOfInterest):
         """Weighted arithmetic mean."""
         y, w = _as_1d(y, w)
         return float(np.sum(y * w) / np.sum(w))
+
+
+class DomainProbability(QuantityOfInterest):
+    r"""
+    Weighted probability of belonging to a 1D OpenTURNS domain.
+
+    :math:`P = \mathbb{E}[\mathbb{1}_D(Y)]`, estimated by
+    :math:`\sum w_i \mathbb{1}_D(y_i) / \sum w_i`.
+
+    The domain defines the event: :math:`D = [s, +\infty[` (exceedance),
+    :math:`D = {]}-\infty, s]` (below threshold),
+    :math:`D = [a, b]` (inside an interval), or any 1D OpenTURNS domain
+    (`DomainUnion`, `DomainComplement`, `LevelSet`, ...).
+    Bootstrap is disabled for this quantity: confidence intervals always
+    come from the closed-form CLT (Lemaitre et al. 2015), so
+    `n_bootstrap` must be 0.
+    """
+
+    def __init__(self, domain: ot.Domain) -> None:
+        """Store the 1D event domain after checking its dimension."""
+        if not (hasattr(domain, "contains") and hasattr(domain, "getDimension")):
+            raise ValueError(
+                "domain must be an OpenTURNS domain with `contains` "
+                f"and `getDimension`: got {type(domain).__name__}."
+            )
+        try:
+            dim = int(domain.getDimension())
+        except (TypeError, ValueError):
+            raise ValueError(
+                "domain must have an integer dimension: "
+                f"got {domain!r}."
+            ) from None
+        if dim != 1:
+            raise ValueError(
+                f"domain must be 1D (output space): got dim={dim}."
+            )
+        self.domain = domain
+
+    def event_mask(self, y: ArrayLike) -> np.ndarray:
+        r"""Boolean membership of outputs in the domain.
+
+        Parameters
+        ----------
+        y : array-like, size `(n,)`
+            Model outputs, must be finite.
+
+        Returns
+        -------
+        numpy.ndarray, size `(n,)`, dtype bool
+            :math:`\mathbb{1}_D(y_i)`.
+        """
+        y1 = np.ravel(np.asarray(y, dtype=float))
+        if not np.all(np.isfinite(y1)):
+            raise ValueError(
+                "Non-finite model outputs: "
+                f"n_nonfinite={int(np.sum(~np.isfinite(y1)))}."
+            )
+        ind = self.domain.contains(y1.reshape(-1, 1))
+        return np.asarray(ind, dtype=bool)
+
+    def __call__(self, y: np.ndarray, w: np.ndarray) -> float:
+        """Weighted fraction of outputs inside the domain."""
+        y, w = _as_1d(y, w)
+        return float(np.sum(w[self.event_mask(y)]) / np.sum(w))
 
 
 class Variance(QuantityOfInterest):
